@@ -10,6 +10,8 @@ import { pathToFileURL } from 'node:url';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+const log2 = (...a) => console.error('[thinker]', ...a);
+
 export class Thinker {
   /**
    * @param bot mineflayer 实例
@@ -87,7 +89,25 @@ export class Thinker {
 {"think": "一句内心想法", "action": "run_skill", "skill": "技能名"}
 {"think": "...", "action": "say", "text": "要说的话"}
 {"think": "...", "action": "move_to", "x": 0, "z": 0}
-{"think": "...", "action": "idle"}`;
+{"think": "...", "action": "idle"}
+{"think": "我为什么要学这个", "action": "learn_skill",
+ "skill": "小写蛇形命名的技能名",
+ "description": "这个技能能干什么(检索用, 写清楚场景)",
+ "code": "完整的 v2 技能代码"}
+
+learn_skill 说明:
+- 当你想做的事没有现成技能时, 自己写一个! 这是你的超能力
+- 代码模板(必须遵守):
+module.exports.run = async (bot, { log }) => {
+  // const { goals: { GoalNear } } = require('mineflayer-pathfinder');
+  // 你可以: bot.chat(cmd), bot.pathfinder.goto(GoalNear(x,y,z,1)),
+  //          bot.lookAt(vec3), bot.dig(block), bot.placeBlock(ref, vec3),
+  //          bot.inventory.items(), bot.blockAt(new (require('vec3').Vec3)(x,y,z))
+  // 禁止: /fill /setblock(批量指令), 长循环无 sleep
+  return '完成描述';
+};
+- 坐标用 bot.entity.position 相对值(别写死), 睡觉前 bot.quit() 不要写
+- 写完会自动执行+验证, 失败会带着报错重新问你(最多 3 次)`;
 
     const user = `当前状态:
 ${perception}
@@ -143,6 +163,12 @@ ${skillMenu}
       return 'moved';
     }
     if (a === 'idle') return 'idled';
+    if (a === 'learn_skill') {
+      if (!decision.skill || !decision.code)
+        return 'learn_skill 缺 skill/code';
+      return this.learnWithRetry(decision.skill, decision.code,
+        decision.description || '');
+    }
     return `未知行动 ${a}`;
   }
 
@@ -179,6 +205,54 @@ ${skillMenu}
       }
     };
     loop();
+  }
+
+  // ── 自学习: 写技能→执行→失败看报错重写(最多3次) ──
+  async learnWithRetry(skillName, code, description) {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const pathJoin = path.default.join;
+    const file = pathJoin(this.skillsDir, `${skillName}.js`);
+    const { goals } = await import('mineflayer-pathfinder');
+    let feedback = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      // 代码安全护栏: 禁 quit/end(会杀死常驻bot), 禁 process.exit
+      let safe = code.replace(/bot\.(quit|end)\s*\(/g, '/*bot.quit disabled*/(')
+                     .replace(/process\.exit\s*\(/g, '/*process.exit disabled*/(');
+      fs.writeFileSync(file, safe + '\n');
+      log2(`[learn] ${skillName} 第${attempt}次尝试`);
+      // 执行(复用 mcbridge 的 runSkillFn — 走 require cache busting)
+      let report;
+      try {
+        report = await this.runSkillFn(skillName, 90000, true);
+      } catch (e) {
+        report = `技能执行异常: ${e.message}
+${(e.stack || '').split('\n')[1] || ''}`;
+      }
+      if (report.includes('执行成功')) {
+        log2(`[learn] ${skillName} 学会了!(${attempt}次尝试)`);
+        this.catalog.push({ name: skillName, desc: description.slice(0, 60) });
+        this._menuCache = null;                 // 技能菜单失效重算
+        return `学会了新技能 ${skillName}: ${report.slice(0, 100)}`;
+      }
+      feedback = report;                        // 失败详情 → 回喂下一轮
+      log2(`[learn] 失败: ${report.slice(0, 120)}`);
+      // 让 LLM 看着报错重写
+      const retry = await this.think(`你刚写了技能 ${skillName} 但执行失败:
+${feedback.slice(0, 600)}
+
+原代码:
+${safe.slice(0, 1200)}
+
+重新写完整代码修复问题。只回 JSON:
+{"think":"问题在哪","action":"learn_skill","skill":"${skillName}","description":"${description}","code":"修复后的完整代码"}`);
+      if (retry.action !== 'learn_skill' || !retry.code)
+        return `学习放弃: ${retry.think || '模型未给出修复'}`;
+      code = retry.code;
+    }
+    // 3次都失败: 删除废稿, 留言
+    try { fs.unlinkSync(file); } catch {}
+    return `学习失败(3次尝试), 已删除废稿。最后报错: ${feedback.slice(0, 150)}`;
   }
 
   saveMemory(decision, result) {
