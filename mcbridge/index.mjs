@@ -51,6 +51,7 @@ bot.once('spawn', () => {
 // ── Idle 行为循环: 不干活时也有活人感 ──────────────────────
 // 技能执行期间暂停(skillActive), 结束后恢复
 let skillActive = false;
+let wanderBusy = false;   // 溜达中(防叠)
 function startIdleLoop() {
   const idleActs = [
     async () => { // 随机张望: 视角甩到随机方向
@@ -85,8 +86,15 @@ function startIdleLoop() {
     while (true) {
       if (!skillActive && bot.entity) {
         try {
-          await idleActs[Math.floor(Math.random() * idleActs.length)]();
-        } catch {}       // idle 失败无声吞掉(别打扰主流程)
+          // 40% 概率去兴趣点溜达(wander 技能), 60% 原地小动作
+          if (Math.random() < 0.4 && !wanderBusy) {
+            wanderBusy = true;
+            await runSkill('wander', 30000, false).catch(() => {});
+            wanderBusy = false;
+          } else {
+            await idleActs[Math.floor(Math.random() * idleActs.length)]();
+          }
+        } catch { wanderBusy = false; }
       }
       await new Promise(r => setTimeout(r, 2500 + Math.random() * 4000));
     }
