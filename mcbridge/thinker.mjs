@@ -21,7 +21,7 @@ export class Thinker {
     this.runSkillFn = runSkill;
     this.skillsDir = opts.skillsDir;
     this.apiKey = opts.apiKey || process.env.GLMT_KEY;
-    this.model = opts.model || 'glm-5.3-flash';
+    this.model = opts.model || 'glm-4.5-air';
     this.intervalMs = opts.intervalMs || 45000;   // 空闲 45s 想一次
     this.memoryPath = opts.memoryPath || path.join(opts.skillsDir, 'bot_memory.json');
     this.memories = [];                            // 最近思考轨迹(连续性)
@@ -106,6 +106,8 @@ ${skillMenu}
       },
       body: JSON.stringify({
         model: this.model, max_tokens: 2000,
+        ...(this.model.includes('flash')
+          ? { thinking: { type: 'disabled' } } : {}),
         system: sys,
         messages: [{ role: 'user', content: user }],
       }),
@@ -147,14 +149,22 @@ ${skillMenu}
   // ── 主循环 ──
   start() {
     const loop = async () => {
+      let prefetched = null;                     // 预取: sleep 期间就发思考请求
       while (this.enabled) {
+        // 睡前预取: 把"下一轮感知+LLM调用"提前发出去, RTT 藏进 sleep 里
+        if (!prefetched && this.bot.entity && !globalThis.__mcbridge?.skillActive) {
+          const perception = this.perceive();
+          prefetched = this.think(perception).catch(() => null);
+        }
         await sleep(this.intervalMs + Math.random() * 15000);
-        if (this.busy || globalThis.__mcbridge?.skillActive) continue; // 干活时不思考
-        if (!this.bot.entity) continue;
+        if (this.busy || globalThis.__mcbridge?.skillActive) { prefetched = null; continue; }
+        if (!this.bot.entity) { prefetched = null; continue; }
         this.busy = true;
         try {
-          const perception = this.perceive();
-          const decision = await this.think(perception);
+          // 取回预取结果(通常已完成, 剩余延迟≈0); 失败/陈旧则现场思考
+          let decision = prefetched ? await prefetched : null;
+          prefetched = null;
+          if (!decision) decision = await this.think(this.perceive());
           const result = await this.act(decision);
           const memo = `${decision.think || decision.action}[${result}]`;
           this.memories.push(memo);

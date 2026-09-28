@@ -23,5 +23,39 @@
   "think": "玩家叫我过去, 先应一声, 下一步再走过去",
   "action": "say",
   "result": "said"
+ },
+ {
+  "t": "2026-09-28T15:17:02.021Z",
+  "think": "早上精神满满, 附近有玩家, 先打个招呼, 然后照例去农田巡视一遍",
+  "action": "say",
+  "result": "said"
+ },
+ {
+  "t": "2026-09-28T15:18:09.461Z",
+  "think": "招呼已经打过了, 按计划去农田巡视一圈, 看看小麦长势如何",
+  "action": "run_skill",
+  "skill": "check_crops",
+  "result": "技能 check_crops 执行成功(112ms)\n农田巡视: 成熟1 生长中78"
+ },
+ {
+  "t": "2026-09-28T15:20:12.289Z",
+  "think": "农田里只有1株成熟的小麦， 割掉补种上保持轮作, 顺便活动活动筋骨",
+  "action": "run_skill",
+  "skill": "harvest_wheat",
+  "result": "技能 harvest_wheat 执行成功(1ms)\n没有成熟的小麦"
+ },
+ {
+  "t": "2026-09-28T15:22:42.654Z",
+  "think": "农活干完了， 上午阳光正好， 去鸟居庭院散散步， 看看枯山水",
+  "action": "run_skill",
+  "skill": "visit_torii",
+  "result": "技能 visit_torii 执行成功(28952ms)\n庭院散步归来"
+ },
+ {
+  "t": "2026-09-28T15:28:48.620Z",
+  "think": "农活和庭院散步都完成了, 上午时光正好沿湖边随意溜达一圈",
+  "action": "run_skill",
+  "skill": "wander",
+  "result": "技能 wander 执行成功(12695ms)\n漫步至 (12, -8)"
  }
 ]
