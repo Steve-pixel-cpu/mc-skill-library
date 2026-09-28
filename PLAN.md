@@ -18,7 +18,12 @@
     embedder 故障降级关键词检索
   - `core/router.py`:混合路由(合成表等结构化查询字典直查,零 embedding)
   - server.py 四工具接入;28 项单测全过
-  - 真语义验收待配 `MC_EMBEDDER_API_KEY`(硅基流动免费档)后跑 MapEmbedder→真实模型验证
+  - **真语义验收通过(硅基流动 BGE-M3 免费档)**:「帮我弄个住的地方」→
+    build_shelter 排第 1,语义鸿沟打通;key 走 config.json(不进 git);
+    智谱 Coding Plan key 实测不含 embedding 额度(1113),已切硅基流动
+  - 已知瑕疵(阶段 3 hard case 素材):「搞点吃的」第 1 是 build_shelter
+    而非 farm_wheat,BGE-M3 对短口语查询区分度有限
+  - 5 个种子技能已入库(代码为占位注释,阶段 1 接入后替换为真 mineflayer 代码)
 
 
 ## 定位
