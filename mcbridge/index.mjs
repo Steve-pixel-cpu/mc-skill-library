@@ -57,10 +57,12 @@ bot.on('chat', (user, msg) => {
 });
 
 // ── 技能执行 v2: 共享 bot, 不再新起进程 ────────────────────
-async function runSkill(name, timeoutMs = 120000) {
+async function runSkill(name, timeoutMs = 120000, reload = true) {
   const file = path.join(SKILLS_DIR, `${name}.js`);
   if (!fs.existsSync(file)) return `技能 ${name} 不存在(${file})`;
-  const mod = await import(`${pathToFileURL(file)}?t=${Date.now()}`);
+  // reload: 每次带时间戳 query 绕过 ESM 缓存 —— 技能改完即生效, 无需重启
+  const url = `${pathToFileURL(file)}${reload ? `?t=${Date.now()}` : ''}`;
+  const mod = await import(url);
   if (typeof mod.run !== 'function')
     return `技能 ${name} 不是 v2 格式(缺 run(bot) 导出)`;
   const t0 = Date.now();
