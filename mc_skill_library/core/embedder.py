@@ -18,6 +18,7 @@ import httpx
 
 _API_URL = "https://api.siliconflow.cn/v1/embeddings"
 _MODEL = "BAAI/bge-m3"
+_ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/embeddings"
 _TIMEOUT = 30.0
 
 
@@ -84,8 +85,53 @@ class SiliconFlowEmbedder:
         return [d["embedding"] for d in sorted(data, key=lambda d: d["index"])]
 
 
+class ZhipuEmbedder:
+    """智谱 GLM embedding-3(OpenAI 兼容格式, 256/512/1024/2048 维可选)。
+
+    免费档够项目用; dimensions 默认 1024 与 brute 检索器的假设一致。
+    """
+
+    def __init__(self, api_key: str, model: str = "embedding-3",
+                 dimensions: int = 1024):
+        self.api_key = api_key
+        self.model = model
+        self.dimensions = dimensions
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_batch([text])[0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        try:
+            resp = httpx.post(
+                _ZHIPU_URL,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "input": texts,
+                      "dimensions": self.dimensions},
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()["data"]
+        except (httpx.HTTPError, OSError) as e:
+            raise EmbeddingError(f"智谱请求失败: {e}") from e
+        except (KeyError, ValueError) as e:
+            raise EmbeddingError(f"智谱响应格式异常: {e}") from e
+        return [d["embedding"]
+                for d in sorted(data, key=lambda d: d["index"])]
+
+
 def make_embedder() -> Embedder:
-    """工厂: 有 key 用 API, 没有用 Fake(确定性降级, 不 raise)。"""
-    key = os.environ.get("MC_EMBEDDER_API_KEY") or \
-        os.environ.get("SILICONFLOW_API_KEY")
-    return SiliconFlowEmbedder(key) if key else FakeEmbedder()
+    """工厂: 按 MC_EMBEDDER_PROVIDER 选择(zhipu/siliconflow);
+    有对应 key 才启用, 否则 FakeEmbedder(确定性降级, 不 raise)。"""
+    provider = os.environ.get("MC_EMBEDDER_PROVIDER", "").lower()
+    zhipu_key = os.environ.get("ZHIPU_API_KEY") or \
+        os.environ.get("MC_EMBEDDER_API_KEY")
+    sf_key = os.environ.get("SILICONFLOW_API_KEY")
+    if provider in ("zhipu", "glm") and zhipu_key:
+        return ZhipuEmbedder(zhipu_key)
+    if provider in ("siliconflow", "sf") and sf_key:
+        return SiliconFlowEmbedder(sf_key)
+    if zhipu_key and not sf_key:
+        return ZhipuEmbedder(zhipu_key)
+    if sf_key:
+        return SiliconFlowEmbedder(sf_key)
+    return FakeEmbedder()

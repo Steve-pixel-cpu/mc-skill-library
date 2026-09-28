@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mc_skill_library.core.embedder import (   # noqa: E402
-    EmbeddingError, FakeEmbedder, SiliconFlowEmbedder,
+    EmbeddingError, FakeEmbedder, SiliconFlowEmbedder, ZhipuEmbedder,
 )
 
 
@@ -74,5 +74,45 @@ def test_siliconflow_error_wrapped(monkeypatch):
     monkeypatch.setattr(
         "mc_skill_library.core.embedder.httpx.post", fake_post)
     e = SiliconFlowEmbedder(api_key="k")
+    with pytest.raises(EmbeddingError):
+        e.embed_batch(["x"])
+
+
+def test_zhipu_request_shape(monkeypatch):
+    """智谱 GLM embedding-3: 请求规格与 OpenAI 兼容格式, dimensions 可调。"""
+    captured = {}
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [
+                {"index": 0, "embedding": [0.1, 0.2, 0.3]},
+            ]}
+
+    def fake_post(url, **kw):
+        captured.update(kw, url=url)
+        return FakeResp()
+
+    monkeypatch.setattr(
+        "mc_skill_library.core.embedder.httpx.post", fake_post)
+    e = ZhipuEmbedder(api_key="zp-key")
+    out = e.embed_batch(["盖房子"])
+    assert "bigmodel.cn" in captured["url"]
+    assert captured["headers"]["Authorization"] == "Bearer zp-key"
+    assert captured["json"]["model"] == "embedding-3"
+    assert captured["json"]["input"] == ["盖房子"]
+    assert out == [[0.1, 0.2, 0.3]]
+
+
+def test_zhipu_error_wrapped(monkeypatch):
+    def fake_post(url, **kw):
+        import httpx
+        raise httpx.HTTPStatusError("429", request=None, response=None)
+
+    monkeypatch.setattr(
+        "mc_skill_library.core.embedder.httpx.post", fake_post)
+    e = ZhipuEmbedder(api_key="zp-key")
     with pytest.raises(EmbeddingError):
         e.embed_batch(["x"])
