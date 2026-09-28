@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 skills/library.jsonl
 skills/*.js
+config.json

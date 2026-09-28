@@ -119,19 +119,18 @@ class ZhipuEmbedder:
                 for d in sorted(data, key=lambda d: d["index"])]
 
 
-def make_embedder() -> Embedder:
-    """工厂: 按 MC_EMBEDDER_PROVIDER 选择(zhipu/siliconflow);
-    有对应 key 才启用, 否则 FakeEmbedder(确定性降级, 不 raise)。"""
-    provider = os.environ.get("MC_EMBEDDER_PROVIDER", "").lower()
-    zhipu_key = os.environ.get("ZHIPU_API_KEY") or \
-        os.environ.get("MC_EMBEDDER_API_KEY")
-    sf_key = os.environ.get("SILICONFLOW_API_KEY")
-    if provider in ("zhipu", "glm") and zhipu_key:
-        return ZhipuEmbedder(zhipu_key)
-    if provider in ("siliconflow", "sf") and sf_key:
-        return SiliconFlowEmbedder(sf_key)
-    if zhipu_key and not sf_key:
-        return ZhipuEmbedder(zhipu_key)
-    if sf_key:
-        return SiliconFlowEmbedder(sf_key)
+def make_embedder(config: Optional[dict] = None) -> Embedder:
+    """工厂: 优先传 config(core/config.load 的结果), 不传则 load()
+    (config.json 优先, 环境变量兜底)。
+    provider: zhipu/siliconflow; 无 key → FakeEmbedder(确定性降级)。"""
+    if config is None:
+        from .config import load
+        config = load()
+    emb = config.get("embedder") or {}
+    provider = str(emb.get("provider", "")).lower()
+    key = emb.get("api_key") or ""
+    if provider in ("zhipu", "glm") and key:
+        return ZhipuEmbedder(key)
+    if provider in ("siliconflow", "sf") and key:
+        return SiliconFlowEmbedder(key)
     return FakeEmbedder()
