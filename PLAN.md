@@ -99,11 +99,15 @@ mc-skill-library/
       → 原地跳 → 重试;寻路 noPath/超时显式上报,不让 Promise 挂死
 
 ### 阶段 3 — Benchmark(2-3 天)
-- [ ] bench/dataset_gen.py:构造评测集(同义改写任务描述 → 期望召回技能)
-- [ ] bench/run_bench.py:暴力 vs chromadb(外包基线)+ 规模扫描(1k/1w/10w 合成数据)
-- [ ] 输出:recall@k / QPS / 内存曲线 + **暴力/HNSW 交叉点分析**
-      (HNSW 实现完成前先出「暴力 vs chromadb」版,结论句式:
-      「≤10w 级数据暴力精确检索全面胜出,生产路径用它」)
+- [x] bench/dataset_gen.py:构造评测集(同义改写任务描述 → 期望召回技能)
+      + hard case(真实验收失败案例入库:「搞点吃的」等 4 条)
+- [x] bench/run_bench.py:recall@k(总体+hard 单列)与纯引擎 QPS 分离度量
+      (embedding 网络延迟不混入引擎耗时);chromadb 基线待补(见下)
+- [x] bench/scale_scan.py:规模扫描 CLI,首轮数据(2026-09-28, 1024维 top-10):
+      1k=1.4ms(727 QPS) / 1w=19.4ms(52 QPS) / 10w=197.5ms(5 QPS),
+      内存 3.9/39/391 MB → **结论: ≤1w 技能暴力完全够用(检索延迟
+      远小于 embedding 网络调用的 1/10);10w 级才需考虑 ANN**
+- [ ] 待补:chromadb 外包基线对比(同一合成库上跑 recall+QPS)
 - [ ] (选修)自研 HNSW 补入对比曲线:分层图 + 贪心搜索 + 启发式选边,
       接口与 brute 一致,周末实验性质,不阻塞主线
 
