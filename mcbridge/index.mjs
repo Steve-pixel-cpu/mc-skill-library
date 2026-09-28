@@ -187,7 +187,10 @@ async function loadEventRules() {
   const f = path.join(SKILLS_DIR, 'event_rules.js');
   if (!fs.existsSync(f)) return;
   try {
-    const mod = await import(`${pathToFileURL(f)}?t=${Date.now()}`);
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    delete require.cache[f];
+    const mod = require(f);
     if (typeof mod.register === 'function') mod.register(addRule);
     console.error(`[event-bridge] rules total: ${eventRules.length}`);
   } catch (e) { console.error('[event-bridge] rules load failed:', e.message); }
@@ -213,8 +216,16 @@ async function runSkill(name, timeoutMs = 120000, reload = true) {
   const file = path.join(SKILLS_DIR, `${name}.js`);
   if (!fs.existsSync(file)) return `技能 ${name} 不存在(${file})`;
   // reload: 每次带时间戳 query 绕过 ESM 缓存 —— 技能改完即生效, 无需重启
-  const url = `${pathToFileURL(file)}${reload ? `?t=${Date.now()}` : ''}`;
-  const mod = await import(url);
+  let mod;
+  if (reload) {
+    // CJS 模块的 ?t= query 不生效(CJS 加载器忽略 query) → 用 require cache 清除
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    delete require.cache[file];
+    mod = require(file);
+  } else {
+    mod = await import(pathToFileURL(file).href);
+  }
   if (typeof mod.run !== 'function')
     return `技能 ${name} 不是 v2 格式(缺 run(bot) 导出)`;
   const t0 = Date.now();
@@ -258,6 +269,30 @@ server.tool('read_chat', '读最近聊天', {
 server.tool('send_chat', 'bot 发聊天消息', { message: z.string() }, async ({ message }) => {
   bot.chat(message);
   return { content: [{ type: 'text', text: '已发送' }] };
+});
+
+server.tool('place_block', '在指定坐标放置方块(bot 需在附近, 走放式建造用)', {
+  x: z.number(), y: z.number(), z: z.number(), block: z.string(),
+}, async ({ x, y, z, block }) => {
+  const { Vec3 } = await import('vec3');
+  const pos = new Vec3(x, y, z);
+  const below = bot.blockAt(pos.offset(0, -1, 0));
+  if (!below) return { content: [{ type: 'text', text: '目标处未加载' }] };
+  const item = bot.inventory.items().find(i => i.name === block.split('[')[0]);
+  if (item) await bot.equip(item, 'hand');
+  const ref = below;
+  await bot.placeBlock(ref, pos.offset(-ref.position.x, -ref.position.y, -ref.position.z));
+  return { content: [{ type: 'text', text: `已放置 ${block} @${x},${y},${z}` }] };
+});
+
+server.tool('dig_block', '挖掉指定坐标方块', {
+  x: z.number(), y: z.number(), z: z.number(),
+}, async ({ x, y, z }) => {
+  const { Vec3 } = await import('vec3');
+  const b = bot.blockAt(new Vec3(x, y, z));
+  if (!b || b.name === 'air') return { content: [{ type: 'text', text: '无方块' }] };
+  await bot.dig(b);
+  return { content: [{ type: 'text', text: `已挖 ${b.name}` }] };
 });
 
 server.tool('run_skill', '在共享 bot 上执行 v2 技能(自动挡, 零新进程)', {

@@ -125,6 +125,7 @@ ${skillMenu}
   async act(decision) {
     const b = this.bot;
     const a = decision.action;
+    if (a === 'move_to') this.busy = true;   // 走动期间锁(防与技能寻路打架)
     if (a === 'run_skill') {
       if (!decision.skill) return '缺 skill';
       return this.runSkillFn(decision.skill, 120000, false);
