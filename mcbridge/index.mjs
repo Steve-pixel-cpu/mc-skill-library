@@ -26,6 +26,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_DIR = process.env.MC_SKILLS_DIR ||
   path.join(__dirname, '..', 'skills');
 
+// ── 进程级异常保护: bot 常驻, 任何异常都不能杀进程 ──
+process.on('uncaughtException', (e) =>
+  console.error('[mcbridge] uncaught:', e.message));
+process.on('unhandledRejection', (e) =>
+  console.error('[mcbridge] unhandled:', e?.message || e));
+
 // ── 参数解析 ─────────────────────────────────────────────
 const argv = process.argv.slice(2);
 function arg(name, dflt) {
