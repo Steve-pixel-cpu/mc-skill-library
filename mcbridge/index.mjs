@@ -18,6 +18,7 @@ import pathfinderPkg from 'mineflayer-pathfinder';
 const { pathfinder, Movements, goals: { GoalNear } } = pathfinderPkg;
 import { Vec3 } from 'vec3';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Thinker } from './thinker.mjs';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -118,6 +119,7 @@ bot.on('end', () => setTimeout(() => process.exit(1), 5000)); // x-code 会重�
 const chatLog = [];
 bot.on('chat', (user, msg) => {
   if (user !== USERNAME) chatLog.push({ user, msg, t: Date.now() });
+  if (chatLog.length > 10) chatLog.shift();
 });
 
 // ── 事件桥: MC 事件/状态 → 自动触发技能(阶段 4 核心) ───────
@@ -268,3 +270,41 @@ server.tool('run_skill', '在共享 bot 上执行 v2 技能(自动挡, 零新进
 const transport = new StdioServerTransport();
 await server.connect(transport);
 console.error('[mcbridge] MCP ready on stdio');
+
+// ── Thinker: bot 的大脑(感知→GLM思考→行动) ──
+// key 来源: GLMT_KEY 环境变量, 或 x-code providers.json(智谱 Coding Plan)
+function loadGlmKey() {
+  if (process.env.GLMT_KEY) return process.env.GLMT_KEY;
+  try {
+    const xcode = JSON.parse(fs.readFileSync(
+      path.join(process.env.USERPROFILE || process.env.HOME,
+                '.x-code', 'providers.json'), 'utf8'));
+    const prov = xcode.providers?.find(p => p.base_url?.includes('bigmodel'));
+    if (prov?.api_key) return prov.api_key;
+  } catch {}
+  return null;
+}
+const glmKey = loadGlmKey();
+if (glmKey) {
+  const thinker = new Thinker(bot, runSkill, {
+    skillsDir: SKILLS_DIR,
+    apiKey: glmKey,
+    model: 'glm-5.3-flash',
+    intervalMs: 45000,
+  });
+  // 感知注入: 最近聊天
+  Object.defineProperty(thinker, 'recentChat', { get: () => chatLog });
+  // skillActive 联动: thinker 模块内部用全局, 这里桥接
+  setInterval(() => {
+    // nothing — thinker reads skillActiveGlobal
+  }, 1000);
+  globalThis.skillActiveGlobal = () => {
+    try { return skillActive; } catch { return false; }
+  };
+  // thinker.js 里 skillActiveGlobal 是变量不是函数 — 改为直接暴露对象
+  globalThis.__mcbridge = { get skillActive() { return skillActive; } };
+  thinker.start();
+  console.error('[mcbridge] thinker started (GLM)');
+} else {
+  console.error('[mcbridge] thinker disabled: no GLM key');
+}
