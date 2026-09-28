@@ -45,7 +45,54 @@ bot.loadPlugin(pathfinder);
 bot.once('spawn', () => {
   bot.pathfinder.setMovements(new Movements(bot));
   console.error(`[mcbridge] spawned at ${bot.entity.position.floored()}`);
+  startIdleLoop();
 });
+
+// ── Idle 行为循环: 不干活时也有活人感 ──────────────────────
+// 技能执行期间暂停(skillActive), 结束后恢复
+let skillActive = false;
+function startIdleLoop() {
+  const idleActs = [
+    async () => { // 随机张望: 视角甩到随机方向
+      const yaw = Math.random() * Math.PI * 2;
+      const pitch = (Math.random() - 0.35) * 1.2;
+      bot.look(yaw, pitch, false);
+    },
+    async () => { // 原地小踱步: 随机走 1-2 格
+      const p = bot.entity.position;
+      const dx = Math.round((Math.random() - 0.5) * 4);
+      const dz = Math.round((Math.random() - 0.5) * 4);
+      await bot.pathfinder.goto(new GoalNear(p.x + dx, p.y, p.z + dz, 0.5))
+        .catch(() => {});
+    },
+    async () => { // 蹲一下(潜行切换)
+      bot.setControlState('sneak', true);
+      await new Promise(r => setTimeout(r, 600 + Math.random() * 800));
+      bot.setControlState('sneak', false);
+    },
+    async () => { // 就地转一圈
+      for (let i = 0; i < 8; i++) {
+        await bot.look(i * Math.PI / 4, 0.1, false);
+        await new Promise(r => setTimeout(r, 90));
+      }
+    },
+    async () => { // 仰头看天(呆望)
+      bot.look(bot.entity.yaw, -1.2, false);
+      await new Promise(r => setTimeout(r, 1500));
+    },
+  ];
+  const loop = async () => {
+    while (true) {
+      if (!skillActive && bot.entity) {
+        try {
+          await idleActs[Math.floor(Math.random() * idleActs.length)]();
+        } catch {}       // idle 失败无声吞掉(别打扰主流程)
+      }
+      await new Promise(r => setTimeout(r, 2500 + Math.random() * 4000));
+    }
+  };
+  loop();
+}
 bot.on('kicked', r => console.error('[mcbridge] kicked:', r));
 bot.on('error', e => console.error('[mcbridge] bot error:', e.message));
 bot.on('end', () => console.error('[mcbridge] disconnected, retrying in 5s'));
@@ -66,6 +113,7 @@ async function runSkill(name, timeoutMs = 120000, reload = true) {
   if (typeof mod.run !== 'function')
     return `技能 ${name} 不是 v2 格式(缺 run(bot) 导出)`;
   const t0 = Date.now();
+  skillActive = true;
   const timer = setTimeout(() => {
     bot.pathfinder.stop?.();
     bot.clearControlStates?.();
@@ -75,7 +123,7 @@ async function runSkill(name, timeoutMs = 120000, reload = true) {
     return `技能 ${name} 执行成功(${Date.now() - t0}ms)\n${out ?? ''}`;
   } catch (e) {
     return `技能 ${name} 执行失败: ${e.message}\n${(e.stack ?? '').split('\n')[1] ?? ''}`;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); skillActive = false; }
 }
 
 // ── MCP 工具(手动挡) ─────────────────────────────────────
