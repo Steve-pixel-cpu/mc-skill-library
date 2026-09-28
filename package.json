@@ -1,0 +1,28 @@
+{
+  "name": "mc-skill-library",
+  "version": "1.0.0",
+  "description": "> 为 LLM Agent 设计的技能库:语义检索 + 可执行代码 —— 让 Agent 学会的技能终身复用,零 LLM 调用。",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Steve-pixel-cpu/mc-skill-library.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Steve-pixel-cpu/mc-skill-library/issues"
+  },
+  "homepage": "https://github.com/Steve-pixel-cpu/mc-skill-library#readme",
+  "dependencies": {
+    "mineflayer": "^4.39.0",
+    "mineflayer-pathfinder": "^2.4.5"
+  }
+}

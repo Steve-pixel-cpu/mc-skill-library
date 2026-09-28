@@ -7,3 +7,4 @@ dist/
 skills/library.jsonl
 skills/*.js
 config.json
+node_modules/
