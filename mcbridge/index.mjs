@@ -86,10 +86,19 @@ function startIdleLoop() {
     while (true) {
       if (!skillActive && bot.entity) {
         try {
-          // 40% 概率去兴趣点溜达(wander 技能), 60% 原地小动作
+          // 自发行程: 按时段挑活动(40% 概率)
+          //   夜间: stargaze / 回家待着
+          //   傍晚: watch_sunset
+          //   白天: wander / visit_torii / 看农田
           if (Math.random() < 0.4 && !wanderBusy) {
             wanderBusy = true;
-            await runSkill('wander', 30000, false).catch(() => {});
+            const t = bot.time ? bot.time.timeOfDay : 0;
+            const pick = [];
+            if (t >= 13000 && t < 23000) pick.push('stargaze', 'go_home');
+            else if (t >= 11000 && t < 13000) pick.push('watch_sunset', 'wander');
+            else pick.push('wander', 'visit_torii', 'check_crops', 'wander');
+            const act = pick[Math.floor(Math.random() * pick.length)];
+            await runSkill(act, 60000, false).catch(() => {});
             wanderBusy = false;
           } else {
             await idleActs[Math.floor(Math.random() * idleActs.length)]();
@@ -148,7 +157,18 @@ setInterval(async () => {
   }
 }, 500);
 
-// ── 内置规则(示例: 天黑回家 / 低血逃跑)──
+// ── 内置规则(示例: 天黑回家 / 低血逃跑 / 定期农活)──
+addRule({
+  type: 'poll',
+  when: async (b) => {
+    // 白天 + 随机散步到农田附近时才检查(自然化)
+    const t = b.time ? b.time.timeOfDay : 0;
+    if (t >= 13000) return false;
+    const p = b.entity.position;
+    return Math.abs(p.x - 86) < 20 && Math.abs(p.z - 0) < 25;  // 在农田附近
+  },
+  skill: 'harvest_wheat', cooldownMs: 5 * 60 * 1000,
+});
 addRule({
   type: 'poll',
   when: (b) => b.time && b.time.timeOfDay >= 13000 && b.time.timeOfDay < 23000,
