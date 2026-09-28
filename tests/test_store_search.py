@@ -69,3 +69,12 @@ def test_stats_bump(store):
     store.bump("craft_table", fail=True)
     rec = store.get("craft_table")
     assert rec["success"] == 1 and rec["fail"] == 1
+
+
+def test_update_embeddings_persists(store):
+    """update_embeddings 把向量写回索引, 重启(新实例)后仍在。"""
+    store.update_embeddings({"mine_wood": [0.1, 0.2]})
+    rec = SkillStore(store.root).get("mine_wood")   # 新实例 = 模拟重启
+    assert rec["embedding"] == [0.1, 0.2]
+    # 其他技能不受影响
+    assert "embedding" not in SkillStore(store.root).get("craft_table")

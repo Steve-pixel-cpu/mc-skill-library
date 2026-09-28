@@ -133,3 +133,11 @@ class SkillStore:
         if fail:
             rec["fail"] += 1
         self._rewrite(records)
+
+    def update_embeddings(self, vecs: dict[str, list[float]]) -> None:
+        """持久化向量缓存(语义检索层写入): name → embedding, 只更新在库技能。"""
+        records = self._load_all()
+        for name, vec in vecs.items():
+            if name in records:
+                records[name]["embedding"] = vec
+        self._rewrite(records)

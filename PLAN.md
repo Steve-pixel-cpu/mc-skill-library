@@ -10,6 +10,15 @@
       + node 执行器;6 项单测全过;端到端冒烟(save→search→exec→stats)通过;已推送 GitHub
 - 过程决策:mcp SDK 2.x FastMCP→MCPServer 改名,已做双版本兼容;
   语义鸿沟留了专门测试(「住的地方」召不回 shelter),阶段 2 embedding 上线后改写为应召回
+- [x] **阶段 2 完成(同日,新克隆 D:\pyworkplace\learn_claude\mc-skill-library)**:
+  - `index/brute.py`:numpy 归一化 + 余弦 top-k + 布尔掩码过滤
+  - `core/embedder.py`:Embedder 协议 + FakeEmbedder(确定性哈希,零网络)
+    + SiliconFlowEmbedder(BAAI/bge-m3);无 key 自动降级,不 raise
+  - `core/semantic.py`:语义检索管线,向量缓存进 library.jsonl(重启零重算),
+    embedder 故障降级关键词检索
+  - `core/router.py`:混合路由(合成表等结构化查询字典直查,零 embedding)
+  - server.py 四工具接入;28 项单测全过
+  - 真语义验收待配 `MC_EMBEDDER_API_KEY`(硅基流动免费档)后跑 MapEmbedder→真实模型验证
 
 
 ## 定位

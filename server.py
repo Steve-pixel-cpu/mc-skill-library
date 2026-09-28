@@ -11,14 +11,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mc_skill_library.executor import execute          # noqa: E402
-from mc_skill_library.search import search              # noqa: E402
-from mc_skill_library.store import Skill, SkillStore    # noqa: E402
+from mc_skill_library.core.embedder import make_embedder        # noqa: E402
+from mc_skill_library.core.router import route                  # noqa: E402
+from mc_skill_library.core.semantic import SemanticSearch       # noqa: E402
+from mc_skill_library.executor import execute                   # noqa: E402
+from mc_skill_library.store import Skill, SkillStore            # noqa: E402
 
 SKILLS_DIR = Path(os.environ.get(
     "MC_SKILLS_DIR", Path(__file__).parent / "skills"))
 
 _store = SkillStore(SKILLS_DIR)
+_semantic = SemanticSearch(_store, make_embedder())
 
 try:
     # mcp SDK 2.x: FastMCP 更名为 MCPServer(2026 起 2.x 为默认安装版本)
@@ -48,17 +51,21 @@ def skill_save(name: str, description: str, code: str,
         code=code,
         tags=[t.strip() for t in tags.split(",") if t.strip()],
     )
-    return _store.save(s)
+    result = _store.save(s)
+    _semantic.invalidate()          # 新技能/新描述 → 补算向量并刷新矩阵
+    return result
 
 
 @mcp.tool()
 def skill_search(query: str, top_k: int = 5, tag: str = "") -> str:
     """按任务描述检索技能。query 用自然语言(如"帮我弄个住的地方");
     可用 tag 过滤类型(build/mine/farm/craft)。返回候选技能与适配度。"""
-    hits = search(_store, query, top_k=top_k, tag=tag or None)
+    structured = route(query)       # 混合路由: 合成表等结构化查询字典直查
+    if structured:
+        return f"[字典直查] {structured}"
+    hits = _semantic.search(query, top_k=top_k, tag=tag or None)
     if not hits:
-        return (f"未找到匹配「{query}」的技能——考虑自己实现并用 skill_save 沉淀。"
-                f"(当前检索为阶段0 关键词实现, 语义检索上线后召回会更好)")
+        return (f"未找到匹配「{query}」的技能——考虑自己实现并用 skill_save 沉淀。")
     for h in hits:
         _store.bump(h["name"], hit=True)
     lines = [f"「{query}」的候选技能({len(hits)} 个):"]

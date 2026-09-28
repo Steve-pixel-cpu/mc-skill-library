@@ -74,7 +74,7 @@ python server.py
 
 - [x] 阶段 0: MCP server 骨架 + JSONL 存储 + 关键词检索(能跑)
 - [ ] 阶段 1: 接入 Minecraft bot,种子技能 5 个
-- [ ] 阶段 2: embedding 语义检索 + 混合路由(结构化查字典/语义走向量)
+- [x] 阶段 2: embedding 语义检索 + 混合路由(结构化查字典/语义走向量)
 - [ ] 阶段 3: benchmark(暴力 vs chromadb + 规模扫描,交叉点分析)
 - [ ] 选修: 自研 HNSW 补入对比曲线
 - [ ] 可选: 事件桥(MC 事件唤醒 Agent)+ 技能自动沉淀
