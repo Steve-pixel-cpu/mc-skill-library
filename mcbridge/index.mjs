@@ -103,6 +103,81 @@ bot.on('chat', (user, msg) => {
   if (user !== USERNAME) chatLog.push({ user, msg, t: Date.now() });
 });
 
+// ── 事件桥: MC 事件/状态 → 自动触发技能(阶段 4 核心) ───────
+// 两类扳机:
+//   1. mineflayer 事件(chat/health 变化等) → 直接挂 bot.on
+//   2. 状态轮询(天黑/位置等) → 500ms tick 检查条件谓词
+// 设计: 事件只做"扳机", 行为全部复用技能库 —— 不在事件里写逻辑
+const eventRules = [];       // {type, event?, when, skill, cooldownMs, lastFired}
+
+function addRule({ type = 'poll', event = null, when, skill, cooldownMs = 60000 }) {
+  const rule = { type, event, when, skill, cooldownMs, lastFired: 0 };
+  eventRules.push(rule);
+  if (type === 'event' && event) {
+    bot.on(event, async (...args) => { await tryFire(rule, bot, args); });
+  }
+}
+
+async function tryFire(rule, botRef, args = []) {
+  const now = Date.now();
+  if (skillActive) return;
+  if (now - rule.lastFired < rule.cooldownMs) return;
+  let ok = false;
+  try { ok = rule.when ? await rule.when(botRef, ...args) : true; }
+  catch { return; }
+  if (!ok) return;
+  rule.lastFired = now;
+  console.error(`[event-bridge] fire: ${rule.skill}`);
+  await runSkill(rule.skill, 120000, false).catch(() => {});
+}
+
+// 状态轮询: 500ms 一次, 条件谓词决定是否触发
+setInterval(async () => {
+  if (skillActive || !bot.entity) return;
+  for (const rule of eventRules) {
+    if (rule.type !== 'poll') continue;
+    await tryFire(rule, bot);
+  }
+}, 500);
+
+// ── 内置规则(示例: 天黑回家 / 低血逃跑)──
+addRule({
+  type: 'poll',
+  when: (b) => b.time && b.time.timeOfDay >= 13000 && b.time.timeOfDay < 23000,
+  skill: 'go_home', cooldownMs: 10 * 60 * 1000,      // 每晚最多一次
+});
+addRule({
+  type: 'poll',
+  when: (b) => b.health < 10,
+  skill: 'go_home', cooldownMs: 30 * 1000,
+});
+
+// ── 事件规则热载: skills/event_rules.js 可选(用户自定义扩展) ──
+async function loadEventRules() {
+  const f = path.join(SKILLS_DIR, 'event_rules.js');
+  if (!fs.existsSync(f)) return;
+  try {
+    const mod = await import(`${pathToFileURL(f)}?t=${Date.now()}`);
+    if (typeof mod.register === 'function') mod.register(addRule);
+    console.error(`[event-bridge] rules total: ${eventRules.length}`);
+  } catch (e) { console.error('[event-bridge] rules load failed:', e.message); }
+}
+loadEventRules();
+
+// ── 兜底技能: go_home(技能库可随时覆盖同名文件) ──
+const goHomeSkill = path.join(SKILLS_DIR, 'go_home.js');
+if (!fs.existsSync(goHomeSkill)) {
+  fs.writeFileSync(goHomeSkill, `// 天黑/低血自动回家(事件桥内置兜底)
+module.exports.run = async (bot, { log }) => {
+  const { goals: { GoalNear } } = require('mineflayer-pathfinder');
+  log('[go_home] 回家');
+  await bot.pathfinder.goto(new GoalNear(55, -60, 20, 2));
+  bot.look(0, -0.6, false);
+  return '已回家(湖边)';
+};
+`);
+}
+
 // ── 技能执行 v2: 共享 bot, 不再新起进程 ────────────────────
 async function runSkill(name, timeoutMs = 120000, reload = true) {
   const file = path.join(SKILLS_DIR, `${name}.js`);
