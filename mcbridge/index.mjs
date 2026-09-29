@@ -58,7 +58,7 @@ bot.once('spawn', () => {
 // ── Idle 行为循环: 不干活时也有活人感 ──────────────────────
 // 技能执行期间暂停(skillActive), 结束后恢复
 let skillActive = false;
-let wanderBusy = false;   // 溜达中(防叠)
+
 function startIdleLoop() {
   const idleActs = [
     async () => { // 随机张望: 视角甩到随机方向
@@ -93,24 +93,12 @@ function startIdleLoop() {
     while (true) {
       if (!skillActive && bot.entity) {
         try {
-          // 自发行程: 按时段挑活动(40% 概率)
-          //   夜间: stargaze / 回家待着
-          //   傍晚: watch_sunset
-          //   白天: wander / visit_torii / 看农田
-          if (Math.random() < 0.4 && !wanderBusy) {
-            wanderBusy = true;
-            const t = bot.time ? bot.time.timeOfDay : 0;
-            const pick = [];
-            if (t >= 13000 && t < 23000) pick.push('stargaze', 'go_home');
-            else if (t >= 11000 && t < 13000) pick.push('watch_sunset', 'wander');
-            else pick.push('wander', 'visit_torii', 'check_crops', 'wander');
-            const act = pick[Math.floor(Math.random() * pick.length)];
-            await runSkill(act, 60000, false).catch(() => {});
-            wanderBusy = false;
-          } else {
-            await idleActs[Math.floor(Math.random() * idleActs.length)]();
-          }
-        } catch { wanderBusy = false; }
+          // idle 只做"肢体语言"(张望/踱步/蹲起/看天) —— 微动作不过 LLM。
+          // 曾经有时段化自发行程(傍晚看夕阳/夜晚观星), v2 起交给 thinker 的
+          // plan 链决策: 那是"下一步干什么"的范畴, 由 LLM 看感知自己安排,
+          // 不再脚本硬编码(治"不智能"的一部分: 节奏还给大脑)。
+          await idleActs[Math.floor(Math.random() * idleActs.length)]();
+        } catch {}
       }
       await new Promise(r => setTimeout(r, 2500 + Math.random() * 4000));
     }
@@ -165,21 +153,35 @@ setInterval(async () => {
   }
 }, 500);
 
-// ── 内置规则(示例: 天黑回家 / 低血逃跑 / 定期农活)──
+// ── 内置规则: 只保留"反射级"(低血/天黑回家) —— 这类不过 LLM 是正确分层。
+// 农田收割曾按写死坐标触发, v2 起改为记忆驱动: 从 places.json 读"农田"位置,
+// 没记住就不触发(bot 自己探索后 remember_place 命名, 才有这项农活)。
+function placeCoords(name) {
+  try {
+    const p = JSON.parse(fs.readFileSync(
+      path.join(SKILLS_DIR, 'places.json'), 'utf8'))[name];
+    return p ? p : null;
+  } catch { return null; }
+}
+
 addRule({
   type: 'poll',
   when: async (b) => {
-    // 白天 + 随机散步到农田附近时才检查(自然化)
     const t = b.time ? b.time.timeOfDay : 0;
-    if (t >= 13000) return false;
+    if (t >= 13000) return false;               // 只白天收
+    const farm = placeCoords('农田') || placeCoords('farm');
+    if (!farm) return false;                    // 没记住农田 → 不触发(不硬编码)
     const p = b.entity.position;
-    return Math.abs(p.x - 86) < 20 && Math.abs(p.z - 0) < 25;  // 在农田附近
+    return Math.abs(p.x - farm.x) < 20 && Math.abs(p.z - farm.z) < 25;
   },
   skill: 'harvest_wheat', cooldownMs: 5 * 60 * 1000,
 });
 addRule({
   type: 'poll',
-  when: (b) => b.time && b.time.timeOfDay >= 13000 && b.time.timeOfDay < 23000,
+  when: (b) => {
+    if (!(b.time && b.time.timeOfDay >= 13000 && b.time.timeOfDay < 23000)) return false;
+    return !!placeCoords('家') || !!placeCoords('home');   // 记住"家"才回
+  },
   skill: 'go_home', cooldownMs: 10 * 60 * 1000,      // 每晚最多一次
 });
 addRule({
@@ -203,16 +205,25 @@ async function loadEventRules() {
 }
 loadEventRules();
 
-// ── 兜底技能: go_home(技能库可随时覆盖同名文件) ──
+// ── 兜底技能: go_home(从记忆 places.json 读"家"坐标, 不再写死世界坐标) ──
 const goHomeSkill = path.join(SKILLS_DIR, 'go_home.js');
 if (!fs.existsSync(goHomeSkill)) {
-  fs.writeFileSync(goHomeSkill, `// 天黑/低血自动回家(事件桥内置兜底)
+  fs.writeFileSync(goHomeSkill, `// 天黑/低血自动回家(事件桥内置兜底; 目标从记忆读取)
+const fs = require('fs');
+const path = require('path');
 module.exports.run = async (bot, { log }) => {
   const { goals: { GoalNear } } = require('mineflayer-pathfinder');
+  let target = null;
+  try {
+    const places = JSON.parse(fs.readFileSync(
+      path.join(__dirname, 'places.json'), 'utf8'));
+    target = places['家'] || places['home'] || null;
+  } catch {}
+  if (!target) return '还没记住"家"在哪(对 bot 说: 记住这里是家)';
   log('[go_home] 回家');
-  await bot.pathfinder.goto(new GoalNear(55, -60, 20, 2));
+  await bot.pathfinder.goto(new GoalNear(target.x, target.y, target.z, 2));
   bot.look(0, -0.6, false);
-  return '已回家(湖边)';
+  return '已回家';
 };
 `);
 }

@@ -5,8 +5,5 @@ __pycache__/
 dist/
 *.egg-info/
 skills/library.jsonl
-skills/*.js
-config.json
-node_modules/
 config.json
 skills/bot_memory.json
