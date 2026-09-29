@@ -56,48 +56,58 @@ bot.once('spawn', () => {
 });
 
 // ── Idle 行为循环: 不干活时也有活人感 ──────────────────────
-// 技能执行期间暂停(skillActive), 结束后恢复
-let skillActive = false;
+// 锁分层(参考村民 Goal.Flag 互斥): move 类技能执行期间锁 MOVE,
+// 但 look 类微动作(张望/看天/转身)可以并行 —— bot 走路时也会东张西望。
+let moveActive = false;   // MOVE 锁: 技能移动/寻路中
+let lookBusy = false;     // LOOK 锁: 微动作瞬时占用(防重叠)
 
 function startIdleLoop() {
   const idleActs = [
-    async () => { // 随机张望: 视角甩到随机方向
+    async () => { // 随机张望: 视角甩到随机方向 (仅 LOOK, 与移动可并行)
       const yaw = Math.random() * Math.PI * 2;
       const pitch = (Math.random() - 0.35) * 1.2;
       bot.look(yaw, pitch, false);
     },
-    async () => { // 原地小踱步: 随机走 1-2 格
+    async () => { // 原地小踱步: 随机走 1-2 格 (需 MOVE)
       const p = bot.entity.position;
       const dx = Math.round((Math.random() - 0.5) * 4);
       const dz = Math.round((Math.random() - 0.5) * 4);
       await bot.pathfinder.goto(new GoalNear(p.x + dx, p.y, p.z + dz, 0.5))
         .catch(() => {});
     },
-    async () => { // 蹲一下(潜行切换)
+    async () => { // 蹲一下(潜行切换) (仅 LOOK/姿态, 与移动可并行)
       bot.setControlState('sneak', true);
       await new Promise(r => setTimeout(r, 600 + Math.random() * 800));
       bot.setControlState('sneak', false);
     },
-    async () => { // 就地转一圈
+    async () => { // 就地转一圈 (仅 LOOK)
       for (let i = 0; i < 8; i++) {
         await bot.look(i * Math.PI / 4, 0.1, false);
         await new Promise(r => setTimeout(r, 90));
       }
     },
-    async () => { // 仰头看天(呆望)
+    async () => { // 仰头看天(呆望) (仅 LOOK)
       bot.look(bot.entity.yaw, -1.2, false);
       await new Promise(r => setTimeout(r, 1500));
     },
   ];
+  const needMove = i => i === 1;   // 只有"小踱步"要 MOVE 锁
   const loop = async () => {
     while (true) {
-      if (!skillActive && bot.entity) {
+      if (bot.entity && !(moveActive)) {   // look 微动作: 技能执行中也可张望
         try {
           // idle 只做"肢体语言"(张望/踱步/蹲起/看天) —— 微动作不过 LLM。
           // 曾经有时段化自发行程(傍晚看夕阳/夜晚观星), v2 起交给 thinker 的
           // plan 链决策: 那是"下一步干什么"的范畴, 由 LLM 看感知自己安排,
           // 不再脚本硬编码(治"不智能"的一部分: 节奏还给大脑)。
-          await idleActs[Math.floor(Math.random() * idleActs.length)]();
+          // v3 锁分层: 技能占 MOVE 时, look 类微动作照常 —— 走路也东张西望
+          const idx = Math.floor(Math.random() * idleActs.length);
+          if (needMove(idx) && moveActive) continue;   // MOVE 被技能占用, 跳过踱步
+          if (lookBusy) continue;
+          lookBusy = true;
+          try { await idleActs[idx](); }
+          catch {}
+          finally { lookBusy = false; }
         } catch {}
       }
       await new Promise(r => setTimeout(r, 2500 + Math.random() * 4000));
@@ -247,6 +257,7 @@ async function runSkill(name, timeoutMs = 120000, reload = true) {
     return `技能 ${name} 不是 v2 格式(缺 run(bot) 导出)`;
   const t0 = Date.now();
   skillActive = true;
+  moveActive = true;      // 技能默认占 MOVE(寻路类占绝大多数)
   const timer = setTimeout(() => {
     bot.pathfinder.stop?.();
     bot.clearControlStates?.();
@@ -256,7 +267,7 @@ async function runSkill(name, timeoutMs = 120000, reload = true) {
     return `技能 ${name} 执行成功(${Date.now() - t0}ms)\n${out ?? ''}`;
   } catch (e) {
     return `技能 ${name} 执行失败: ${e.message}\n${(e.stack ?? '').split('\n')[1] ?? ''}`;
-  } finally { clearTimeout(timer); skillActive = false; }
+  } finally { clearTimeout(timer); skillActive = false; moveActive = false; }
 }
 
 // ── MCP 工具(手动挡) ─────────────────────────────────────
@@ -354,7 +365,8 @@ if (glmKey) {
     try { return skillActive; } catch { return false; }
   };
   // thinker.js 里 skillActiveGlobal 是变量不是函数 — 改为直接暴露对象
-  globalThis.__mcbridge = { get skillActive() { return skillActive; } };
+  globalThis.__mcbridge = { get skillActive() { return skillActive; },
+                          get moveActive() { return moveActive; } };
   thinker.start();
   console.error('[mcbridge] thinker started (GLM)');
 } else {

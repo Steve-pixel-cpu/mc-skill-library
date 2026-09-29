@@ -69,6 +69,28 @@ export class Thinker {
     catch {}
   }
 
+  // ── 记忆: 带时间戳, perceive 时按新鲜度衰减(参考村民 Memory 过期机制) ──
+  addMemory(text) {
+    this.memories.push({ text, t: Date.now() });
+    if (this.memories.length > 12) this.memories.shift();
+  }
+  // 新鲜度: <2h 原样, 2-6h 标(旧), >6h 丢弃 —— 近期事件权重高, 遗忘是特性
+  freshMemories(n = 3) {
+    const now = Date.now();
+    return this.memories
+      .filter(m => now - m.t < 6 * 3600e3)
+      .slice(-n)
+      .map(m => (now - m.t < 2 * 3600e3 ? m.text : `${m.text}(旧)`));
+  }
+
+  // ── 作息软提示(参考村民 Schedule, 但不强制): 只把常识喂给大脑, 决定权在 LLM ──
+  scheduleHint(t) {
+    if (t >= 13000 && t < 23000) return '\n(夜深了 — 除非有要事或玩家招呼, 考虑回家/歇息)';
+    if (t >= 11000 && t < 13000) return '\n(傍晚 — 一天快结束了, 收尾手头的事或看个夕阳)';
+    if (t < 1000) return '\n(清晨 — 新的一天)';
+    return '';
+  }
+
   // ── 感知: 世界状态 → 处境摘要(瘦身版) ──
   perceive() {
     const b = this.bot;
@@ -91,7 +113,7 @@ export class Thinker {
     const placesStr = Object.entries(this.places)
       .map(([name, p]) => `${name}(${p.x},${p.y},${p.z})`).join(' ') || '还没探索过';
 
-    return `时间: ${timeStr}(${t})
+    return `时间: ${timeStr}(${t})${this.scheduleHint(t)}
 位置: ${pos.x}, ${pos.y}, ${pos.z}
 我记得的地点: ${placesStr}
 血量: ${Math.round(b.health)}/20 饥饿: ${b.food ?? '?'}/20
@@ -99,7 +121,7 @@ export class Thinker {
 附近玩家: ${players.join(',') || '没有'}
 最近聊天: ${recentChat}
 突发: ${this.wakeEvent || '无'}
-最近思考: ${this.memories.slice(-3).join(' → ') || '无'}`;
+最近思考: ${this.freshMemories(3).join(' → ') || '无'}`;
   }
 
   // ── 思考: 调 GLM(快慢脑分流) ──
@@ -283,8 +305,7 @@ ${perception}
           const result = await this.runPlan(plan);
           this.planAbort = null;
           const memo = `${decision.think || ''}[${result}]`.slice(0, 200);
-          this.memories.push(memo);
-          if (this.memories.length > 12) this.memories.shift();
+          this.addMemory(memo);
           console.error(`[thinker] ${memo}`);
           this.saveMemory(decision, result);
         } catch (e) {
