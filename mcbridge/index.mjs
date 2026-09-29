@@ -352,7 +352,10 @@ if (glmKey) {
   const thinker = new Thinker(bot, runSkill, {
     skillsDir: SKILLS_DIR,
     apiKey: glmKey,
-    model: 'glm-5.3-flash',
+    // v4: 视觉开眼 — GLM-5.3 原生多模态, 快脑也带视觉
+    model: 'glm-5.3',            // 慢脑/主脑(多模态)
+    fastModel: 'glm-5.3',        // 快脑: 5.3 已够快(思考关闭), 不再用 flash 降智
+    visionEnabled: true,         // 决策时带第一人称截图(带节流策略)
     intervalMs: 45000,
   });
   // 感知注入: 最近聊天

@@ -30,6 +30,10 @@ export class Thinker {
     this.apiKey = opts.apiKey || process.env.GLMT_KEY;
     this.model = opts.model || 'glm-5.3';              // 慢脑: learn_skill/重写
     this.fastModel = opts.fastModel || 'glm-5.3-flash'; // 快脑: 常规决策
+    this.visionEnabled = opts.visionEnabled || false;   // 视觉决策(GLM-5.3 多模态)
+    this.visionCooldownMs = 5 * 60 * 1000;              // 截图节流: 5min 最多一张
+    this._lastVisionAt = 0;
+    this.visionProvider = opts.visionProvider || null;  // {capture(): Promise<string>} 截图源(外部注入)
     this.intervalMs = opts.intervalMs || 45000;   // 空闲 45s 想一次
     this.memoryPath = opts.memoryPath || path.join(opts.skillsDir, 'bot_memory.json');
     this.placesPath = opts.placesPath || path.join(opts.skillsDir, 'places.json');
@@ -124,8 +128,8 @@ export class Thinker {
 最近思考: ${this.freshMemories(3).join(' → ') || '无'}`;
   }
 
-  // ── 思考: 调 GLM(快慢脑分流) ──
-  async think(perception, forceSlow = false) {
+  // ── 思考: 调 GLM(快慢脑分流; 视觉: 新地点/事件中断时带截图) ──
+  async think(perception, forceSlow = false, imageBase64 = null) {
     const skillMenu = this.catalog
       .map(s => `- ${s.name}: ${s.desc}`).join('\n');
     const sys = `你是 Minecraft 里的 bot「XBot」。根据处境决定接下来的行动安排。
@@ -167,6 +171,14 @@ ${perception}
 
     const useModel = forceSlow || String(this.thinkHasCode).includes('learn')
       ? this.model : this.fastModel;
+    // 视觉消息组装: 有截图时用多模态 content 块(GLM-5.3 原生多模态)
+    const userContent = imageBase64
+      ? [
+          { type: 'image', source: { type: 'base64',
+              media_type: 'image/png', data: imageBase64 } },
+          { type: 'text', text: `${user}\n\n(附: 你当前视角的截图, 结合它判断处境)` },
+        ]
+      : user;
     const resp = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
       method: 'POST',
       headers: {
@@ -179,7 +191,7 @@ ${perception}
         ...(useModel.includes('flash')
           ? { thinking: { type: 'disabled' } } : {}),
         system: sys,
-        messages: [{ role: 'user', content: user }],
+        messages: [{ role: 'user', content: userContent }],
       }),
       signal: AbortSignal.timeout(25000),
     });
@@ -218,7 +230,7 @@ ${perception}
       return 'moved';
     }
     if (a === 'inspect') {
-      // 环顾四周: 简报视野内值得注意的东西(玩家/生物/特殊方块)
+      // 环顾四周: 报告视野内值得注意的东西 + 尝试带截图(视觉版 inspect)
       const entities = Object.values(b.entities)
         .filter(e => e.type !== 'object' && e.type !== 'player'
           && e.username !== b.username)
@@ -226,6 +238,8 @@ ${perception}
       const nearPlayers = Object.values(b.players)
         .filter(p => p.entity && p.username !== b.username)
         .map(p => p.username);
+      const img = await this.shouldCapture(true).catch(() => null);
+      if (img) return `(看了一眼) 周围: 玩家[${nearPlayers}] 生物[${entities}]`;
       return `周围: 玩家[${nearPlayers}] 生物[${entities}]`;
     }
     if (a === 'remember_place') {
@@ -276,6 +290,19 @@ ${perception}
     });
   }
 
+  // ── 视觉: 该不该带截图(节流策略: 像人一样"扫一眼新环境, 之后靠记忆") ──
+  async shouldCapture(force = false) {
+    if (!this.visionEnabled || !this.visionProvider) return null;
+    const now = Date.now();
+    // 触发条件: 强制(事件中断/inspect) 或 距上次截图超过冷却(新周期开眼一次)
+    if (!force && now - this._lastVisionAt < this.visionCooldownMs) return null;
+    try {
+      const b64 = await this.visionProvider.capture();
+      this._lastVisionAt = now;
+      return b64;
+    } catch { return null; }
+  }
+
   // ── 主循环 ──
   start() {
     const loop = async () => {
@@ -293,10 +320,12 @@ ${perception}
           let decision = prefetched ? await prefetched : null;
           prefetched = null;
           const ev = this.wakeEvent;
-          if (ev) {   // 被事件叫醒: 感知里已带突发事由, 现场重想(prefetch 可能是旧的)
-            decision = await this.think(this.perceive());
+          if (ev) {   // 被事件叫醒: 感知里已带突发事由, 现场重想 + 强制开眼
+            decision = await this.think(this.perceive(),
+              false, await this.shouldCapture(true));
           } else if (!decision) {
-            decision = await this.think(this.perceive());
+            decision = await this.think(this.perceive(),
+              false, await this.shouldCapture(false));
           }
           this.wakeEvent = null;
           this.planAbort = new AbortController();
